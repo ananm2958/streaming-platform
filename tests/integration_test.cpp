@@ -24,6 +24,8 @@ constexpr int kFollower2Port = 19093;
 constexpr int kFollower3Port = 19094;
 constexpr char kHost[] = "127.0.0.1";
 constexpr char kDataDir[] = "/tmp/streaming-platform-test";
+constexpr auto kFailoverDeadline = std::chrono::seconds(12);
+constexpr auto kFailoverPollInterval = std::chrono::milliseconds(50);
 
 struct BrokerProcess {
     pid_t pid;
@@ -125,6 +127,27 @@ bool wait_for_ports() {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     return false;
+}
+
+std::chrono::milliseconds measure_failover() {
+    const auto started = std::chrono::steady_clock::now();
+    const auto deadline = started + kFailoverDeadline;
+
+    while (std::chrono::steady_clock::now() < deadline) {
+        const Response metadata = send_request(
+            kFollower2Port,
+            Request{RequestType::METADATA, "", 0, "", 0, 0}
+        );
+        if (metadata.success &&
+            metadata.message.find("2:127.0.0.1:19093 role:leader") != std::string::npos) {
+            return std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - started
+            );
+        }
+        std::this_thread::sleep_for(kFailoverPollInterval);
+    }
+
+    throw std::runtime_error("leader election exceeded failover deadline");
 }
 
 void require(bool condition, const std::string& message) {
@@ -238,6 +261,22 @@ int main() {
             uncommitted_fetch.message == "offset_not_committed",
             "expected offset_not_committed"
         );
+
+        // Simulate an ungraceful leader crash and measure election time.
+        kill(processes[0].pid, SIGKILL);
+        waitpid(processes[0].pid, nullptr, 0);
+        processes[0].pid = -1;
+        const std::chrono::milliseconds failover_time = measure_failover();
+        std::cout << "localhost leader failover time: " << failover_time.count()
+                  << " ms\n";
+        require(failover_time < std::chrono::seconds(2),
+                "failover exceeded the two-second localhost latency budget");
+        const Response post_failover_produce = send_request(
+            kFollower2Port,
+            Request{RequestType::PRODUCE, "orders", 0, "after failover", 0, 0}
+        );
+        require(post_failover_produce.success, "produce after failover failed");
+        require(post_failover_produce.appended_offset == 2, "failover offset mismatch");
 
         std::cout << "integration_test passed\n";
         stop_brokers(processes);

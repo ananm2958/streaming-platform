@@ -18,13 +18,14 @@ BrokerConfig::BrokerConfig(
       leader_broker_id(leader_broker_id) {}
 
 bool BrokerConfig::get_leader_endpoint(LeaderEndpoint& endpoint) const {
-    if (leader_broker_id == broker_id) {
+    const int leader_id = leader_broker_id.load();
+    if (leader_id == broker_id) {
         endpoint = LeaderEndpoint{broker_id, ip_address, port};
         return true;
     }
 
     for (const ClusterPeer& peer : peers) {
-        if (peer.broker_id == leader_broker_id) {
+        if (peer.broker_id == leader_id) {
             endpoint = LeaderEndpoint{peer.broker_id, peer.host, peer.port};
             return true;
         }
@@ -32,3 +33,10 @@ bool BrokerConfig::get_leader_endpoint(LeaderEndpoint& endpoint) const {
 
     return false;
 }
+
+void BrokerConfig::set_leader(int id) const {
+    leader_broker_id.store(id);
+    type.store(id == broker_id ? LEADER : FOLLOWER);
+}
+
+void BrokerConfig::promote_to_leader() const { set_leader(broker_id); }

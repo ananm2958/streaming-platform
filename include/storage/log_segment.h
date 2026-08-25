@@ -11,6 +11,8 @@ public:
     uint64_t append(const std::string& message);
     std::string read(uint64_t position);
     void flush();
+    void sync();
+    void truncate(uint64_t size);
     uint64_t sizes() const;
 
 private:
@@ -18,4 +20,5 @@ private:
     std::string filePath;
     uint64_t base_offset;
     uint64_t current_size;
+    void reopen();
 };

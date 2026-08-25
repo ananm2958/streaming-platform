@@ -131,7 +131,9 @@ int main(int argc, char* argv[]) {
         leader_id
     );
 
+    // Default storage policy: sync after 64 records or five milliseconds.
     StorageEngine storage(config.get_data_directory(), 1024 * 1024);
+    // ReplicationManager owns runtime heartbeat/election state for this broker.
     ReplicationManager replication(config, storage);
     Broker broker(config, storage, replication);
     TCPServer server(port, &broker);

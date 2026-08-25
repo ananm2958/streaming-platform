@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <atomic>
 #include <vector>
 
 enum BrokerType { LEADER, FOLLOWER };
@@ -50,18 +51,20 @@ public:
     }
 
     BrokerType get_type() const { 
-        return type; 
+        return type.load();
     }
     
     int get_leader_broker_id() const { 
-        return leader_broker_id; 
+        return leader_broker_id.load();
     }
 
     bool is_leader() const { 
-        return type == LEADER; 
+        return get_type() == LEADER;
     }
 
     bool get_leader_endpoint(LeaderEndpoint& endpoint) const;
+    void set_leader(int broker_id) const;
+    void promote_to_leader() const;
 
 private:
     int port;
@@ -69,6 +72,6 @@ private:
     std::string ip_address;
     std::vector<ClusterPeer> peers;
     std::string data_directory;
-    BrokerType type;
-    int leader_broker_id;
+    mutable std::atomic<BrokerType> type;
+    mutable std::atomic<int> leader_broker_id;
 };

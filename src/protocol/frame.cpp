@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cstring>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <unistd.h>
 
 #include <string>
@@ -60,19 +61,33 @@ bool read_frame(int socket_fd, std::string& payload) {
 }
 
 bool write_frame(int socket_fd, const std::string& payload) {
-    const std::string frame = wrap_frame(payload);
+    // Scatter/gather I/O writes the header and caller-owned payload directly;
+    // the old implementation allocated and copied a combined frame per send.
+    const uint32_t network_length = htonl(static_cast<uint32_t>(payload.size()));
+    iovec buffers[2] = {
+        {const_cast<uint32_t*>(&network_length), sizeof(network_length)},
+        {const_cast<char*>(payload.data()), payload.size()}
+    };
+    iovec* current = buffers;
+    int buffer_count = payload.empty() ? 1 : 2;
     size_t total_sent = 0;
-    while (total_sent < frame.size()) {
-        const ssize_t sent = send(
-            socket_fd,
-            frame.data() + total_sent,
-            frame.size() - total_sent,
-            0
-        );
+    const size_t frame_size = sizeof(network_length) + payload.size();
+    while (total_sent < frame_size) {
+        const ssize_t sent = writev(socket_fd, current, buffer_count);
         if (sent <= 0) {
             return false;
         }
         total_sent += static_cast<size_t>(sent);
+        size_t consumed = static_cast<size_t>(sent);
+        while (buffer_count > 0 && consumed >= current[0].iov_len) {
+            consumed -= current[0].iov_len;
+            ++current;
+            --buffer_count;
+        }
+        if (buffer_count > 0 && consumed > 0) {
+            current[0].iov_base = static_cast<char*>(current[0].iov_base) + consumed;
+            current[0].iov_len -= consumed;
+        }
     }
     return true;
 }

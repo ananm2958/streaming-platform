@@ -9,6 +9,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <mutex>
 
 class ReplicationManager {
 public:
@@ -23,6 +24,8 @@ public:
         uint64_t offset,
         const std::string& message
     );
+    bool replicate_batch(const std::string& topic, int partition, uint64_t first_offset,
+                         const std::vector<std::string>& messages);
 
     void handle_replication_request(const Request& request, int source_socket);
 
@@ -78,6 +81,8 @@ public:
     void mark_follower_failed(int broker_id);
 
     bool is_peer_available(int broker_id) const;
+    void maybe_elect_leader();
+    bool is_leader() const;
 
 private:
     static std::string make_log_key(const std::string& topic, int partition);
@@ -109,9 +114,8 @@ private:
         uint64_t offset
     );
 
-    BrokerConfig config_;
+    const BrokerConfig& config_;
     StorageEngine& storage_;
-    BrokerType role_;
     std::unordered_map<int, uint64_t> follower_ack_offsets_;
     std::unordered_map<std::string, int> ack_counts_;
     std::unordered_map<std::string, std::unordered_set<int>> ack_followers_;
@@ -121,4 +125,5 @@ private:
         std::chrono::steady_clock::time_point
     > last_heartbeat_;
     std::unordered_set<int> failed_peers_;
+    mutable std::recursive_mutex mutex_;
 };

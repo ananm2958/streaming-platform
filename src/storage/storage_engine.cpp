@@ -3,6 +3,7 @@
 #include "log.h"
 
 #include <filesystem>
+#include <algorithm>
 #include <memory>
 #include <stdexcept>
 
@@ -12,12 +13,20 @@ StorageEngine::StorageEngine(
     const std::string& data_directory,
     size_t max_segment_size
 )
+    : StorageEngine(data_directory, max_segment_size, 64) {}
+
+StorageEngine::StorageEngine(
+    const std::string& data_directory,
+    size_t max_segment_size,
+    size_t sync_batch_size
+)
     : data_directory_(data_directory),
-      max_segment_size_(max_segment_size) {
+      max_segment_size_(max_segment_size),
+      sync_batch_size_(sync_batch_size) {
     fs::create_directories(data_directory_);
 }
 
-StorageEngine::~StorageEngine() = default;
+StorageEngine::~StorageEngine() { flush_all(); }
 
 std::string StorageEngine::make_key(
     const std::string& topic,
@@ -31,14 +40,20 @@ std::string StorageEngine::log_directory_for_key(const std::string& key) const {
 }
 
 Log& StorageEngine::get_or_create_log(const std::string& key) {
+    // Log owns the on-disk segments, WAL, and rebuilt offset index.
     if (logs_.find(key) == logs_.end()) {
         logs_[key] = std::make_unique<Log>(
             log_directory_for_key(key),
-            max_segment_size_
+            max_segment_size_,
+            sync_batch_size_
         );
     }
 
     return *logs_[key];
+}
+
+void StorageEngine::flush_all() {
+    for (const auto& entry : logs_) entry.second->flush();
 }
 
 uint64_t StorageEngine::append(
@@ -76,4 +91,15 @@ void StorageEngine::flush(const std::string& topic, int partition) {
 
 bool StorageEngine::has_log(const std::string& topic, int partition) const {
     return logs_.find(make_key(topic, partition)) != logs_.end();
+}
+
+std::vector<int> StorageEngine::partitions_for_topic(const std::string& topic) const {
+    std::vector<int> partitions;
+    const std::string prefix = topic + "-";
+    for (const auto& entry : logs_) {
+        if (entry.first.rfind(prefix, 0) != 0) continue;
+        try { partitions.push_back(std::stoi(entry.first.substr(prefix.size()))); } catch (const std::exception&) {}
+    }
+    std::sort(partitions.begin(), partitions.end());
+    return partitions;
 }

@@ -12,6 +12,13 @@ enum RequestType {
     HEARTBEAT,
     COMMIT,
     METADATA,
+    JOIN_GROUP,
+    LEAVE_GROUP,
+    GROUP_FETCH,
+    COMMIT_OFFSET,
+    GROUP_ASSIGNMENT,
+    BATCH_PRODUCE,
+    BATCH_REPLICATE,
     ERROR
 };
 
@@ -24,19 +31,17 @@ struct Request {
     std::string message;
     uint64_t fetch_offset;
     int broker_id;
+    std::string group_id;
+    std::string member_id;
+    std::vector<std::string> messages;
 };
 
 struct Response {
     bool success;
     std::string message;
     uint64_t appended_offset;
+    std::vector<uint64_t> appended_offsets;
 };
-
-constexpr char kFieldSeparator = '\x1f';
-
-std::vector<std::string> split_fields(const std::string& payload);
-
-std::string join_fields(const std::vector<std::string>& fields);
 
 Request parse_request(const std::string& payload);
 
